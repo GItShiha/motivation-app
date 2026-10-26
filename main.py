@@ -7,11 +7,12 @@ from datetime import date, datetime
 from pathlib import Path
 
 from guide import IntentionsGuide
+from autostart import Autostart
 
 from PySide6.QtCore import Qt, QTimer, QStandardPaths
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
-    QPushButton, QFrame, QLineEdit, QTextEdit, QSlider, QSpinBox, QComboBox,
+    QPushButton, QFrame, QLineEdit, QTextEdit, QSlider, QSpinBox, QComboBox, QCheckBox,
     QStackedWidget, QScrollArea, QMessageBox, QLayout,
 )
 
@@ -89,9 +90,10 @@ def card():
 
 
 class Window(QMainWindow):
-    def __init__(self, store):
+    def __init__(self, store, autostart=None):
         super().__init__()
         self.store = store
+        self.autostart = autostart if autostart is not None else Autostart()
         self.setWindowTitle('Точка опоры')
         self.resize(1140, 820)
         self.setMinimumSize(850, 650)
@@ -115,7 +117,7 @@ class Window(QMainWindow):
         nav.addSpacing(35)
         self.navs = []
         self.stack = QStackedWidget()
-        for i, name in enumerate(['Обзор', 'Если → то', 'Пауза от ленты', 'Самочувствие']):
+        for i, name in enumerate(['Обзор', 'Если → то', 'Пауза от ленты', 'Самочувствие', 'Настройки']):
             b = button(name, lambda checked=False, index=i: self.navigate(index))
             b.setObjectName('nav')
             b.setCheckable(True)
@@ -130,7 +132,40 @@ class Window(QMainWindow):
         self.build_plans()
         self.build_focus()
         self.build_wellbeing()
+        self.build_settings()
         self.navigate(0)
+
+    def build_settings(self):
+        lay = self.page('Настройки', 'Выберите, как приложение будет запускаться.')
+        box, contents = card()
+        self.autostart_toggle = QCheckBox('Запускать при входе в систему')
+        contents.addWidget(self.autostart_toggle)
+        contents.addWidget(label('Приложение откроется после входа в вашу учётную запись. '
+                                 'После перемещения приложения или Python выключите и снова включите автозапуск.', 'subtitle'))
+        self.autostart_status = label('', 'subtitle')
+        contents.addWidget(self.autostart_status)
+        self.autostart_toggle.setEnabled(self.autostart.supported)
+        try:
+            self.autostart_toggle.setChecked(self.autostart.enabled() if self.autostart.supported else False)
+        except OSError as exc:
+            self.autostart_toggle.setEnabled(False)
+            self.autostart_status.setText(f'Не удалось проверить автозапуск: {exc}')
+        if not self.autostart.supported:
+            self.autostart_status.setText('Автозапуск не поддерживается на этой системе.')
+        self.autostart_toggle.toggled.connect(self.change_autostart)
+        lay.addWidget(box)
+        lay.addStretch()
+
+    def change_autostart(self, enabled):
+        try:
+            self.autostart.set_enabled(enabled)
+        except OSError as exc:
+            self.autostart_toggle.blockSignals(True)
+            self.autostart_toggle.setChecked(not enabled)
+            self.autostart_toggle.blockSignals(False)
+            self.autostart_status.setText(f'Не удалось изменить автозапуск: {exc}')
+            return
+        self.autostart_status.setText('Автозапуск включён.' if enabled else 'Автозапуск выключен.')
 
     def persist(self):
         try:
