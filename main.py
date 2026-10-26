@@ -17,6 +17,7 @@ from update_ui import UpdatePanel
 from sounds import TimerSounds, SoundSettings
 from wellbeing import entries as valid_entries
 from wellbeing_ui import WellbeingPage
+from scroll_guard import protect_page
 
 from PySide6.QtCore import Qt, QTimer, QStandardPaths
 from PySide6.QtWidgets import (
@@ -250,6 +251,7 @@ class Window(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(contents)
+        protect_page(scroll)
         self.stack.addWidget(scroll)
         return layout
 
