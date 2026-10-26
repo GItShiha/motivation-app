@@ -8,6 +8,7 @@ from pathlib import Path
 
 from guide import IntentionsGuide
 from autostart import Autostart
+from recovery_ui import RecoveryPage
 
 from PySide6.QtCore import Qt, QTimer, QStandardPaths
 from PySide6.QtWidgets import (
@@ -117,7 +118,7 @@ class Window(QMainWindow):
         nav.addSpacing(35)
         self.navs = []
         self.stack = QStackedWidget()
-        for i, name in enumerate(['Обзор', 'Если → то', 'Пауза от ленты', 'Самочувствие', 'Настройки']):
+        for i, name in enumerate(['Обзор', 'Если → то', 'Пауза от ленты', 'Самочувствие', 'Настройки', 'Восстановление']):
             b = button(name, lambda checked=False, index=i: self.navigate(index))
             b.setObjectName('nav')
             b.setCheckable(True)
@@ -133,6 +134,9 @@ class Window(QMainWindow):
         self.build_focus()
         self.build_wellbeing()
         self.build_settings()
+        recovery_layout = self.page('Восстановление', 'Как вы себя чувствуете? Выберите время и посильный способ восстановиться.')
+        self.recovery = RecoveryPage(self)
+        recovery_layout.addWidget(self.recovery)
         self.navigate(0)
 
     def build_settings(self):
@@ -324,6 +328,9 @@ class Window(QMainWindow):
         lay.addStretch()
 
     def start_focus(self):
+        if self.recovery.exercise is not None:
+            self.focus_status.setText('Сначала завершите восстановление.')
+            return
         self.session_minutes = self.duration.value()
         self.remaining = self.session_minutes * 60
         self.deadline = time.monotonic() + self.remaining
@@ -447,6 +454,12 @@ class Window(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
+        if self.recovery.exercise is not None:
+            self.recovery.finish('interrupted')
+        if self.recovery.record and not self.recovery.save_result():
+            event.ignore()
+            return
+        self.recovery.stop_audio()
         event.accept()
 
 
