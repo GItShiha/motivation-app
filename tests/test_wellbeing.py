@@ -122,3 +122,34 @@ class WellbeingTests(unittest.TestCase):
             self.assertIn('Дней с записью: 1', window.wellbeing.month_summary.text())
             window.close()
             self.assertEqual(Store(path).data['entries']['bad'], {'mood': 'x'})
+
+    def test_clear_day_removes_record_and_draft_without_recreating_on_close(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'data.json'
+            store = Store(path)
+            store.data['entries'] = {'2024-02-29': entry(0), '2024-02-28': entry(8)}
+            window = Window(store)
+            window.wellbeing.calendar.setSelectedDate(QDate(2024, 2, 29))
+            window.note.setPlainText('Черновик')
+            self.assertTrue(window.wellbeing.clear_day())
+            self.assertFalse(window.wellbeing.dirty)
+            self.assertNotIn('2024-02-29', window.wellbeing.calendar.records)
+            self.assertEqual(month_stats(store.data['entries'], 2024, 2)['mean'], 8)
+            window.close()
+            restored = Window(Store(path))
+            self.assertNotIn('2024-02-29', restored.store.data['entries'])
+            self.assertNotIn('2024-02-29', restored.wellbeing.drafts())
+            self.assertFalse(restored.wellbeing.dirty)
+            restored.close()
+
+    def test_clear_failure_preserves_record_and_editor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / 'data.json')
+            store.data['entries'] = {'2024-02-29': entry(7)}
+            window = Window(store)
+            window.wellbeing.calendar.setSelectedDate(QDate(2024, 2, 29))
+            with patch.object(window, 'persist', return_value=False):
+                self.assertFalse(window.wellbeing.clear_day())
+            self.assertEqual(store.data['entries']['2024-02-29']['mood'], 7)
+            self.assertEqual(window.sliders[0].value(), 7)
+            window.close()
