@@ -1,7 +1,11 @@
 """Точка опоры — локальное настольное приложение для маленьких устойчивых действий."""
+import sys
+if __name__ == '__main__' and '--update-smoke-test' not in sys.argv:
+    from update_bootstrap import route
+    route()
+
 import json
 import os
-import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -9,6 +13,7 @@ from pathlib import Path
 from guide import IntentionsGuide
 from autostart import Autostart
 from recovery_ui import RecoveryPage
+from update_ui import UpdatePanel
 
 from PySide6.QtCore import Qt, QTimer, QStandardPaths
 from PySide6.QtWidgets import (
@@ -27,15 +32,15 @@ class Store:
                 loaded = json.loads(self.path.read_text(encoding="utf-8"))
                 if not isinstance(loaded, dict) or not isinstance(loaded.get('plans'), list) or not isinstance(loaded.get('entries'), dict) or not isinstance(loaded.get('sessions'), list):
                     raise ValueError('Неверный формат данных')
+                if loaded.get('schema_version', 1) != 1:
+                    raise ValueError('Эта версия не поддерживает формат данных. Файл не изменён; используйте совместимую версию приложения.')
                 self.data = loaded
             except (ValueError, OSError) as exc:
                 raise RuntimeError(f'Не удалось прочитать {self.path}. Файл сохранён без изменений. {exc}') from exc
 
     def save(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix('.tmp')
-        tmp.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding='utf-8')
-        os.replace(tmp, self.path)
+        from update_bootstrap import atomic
+        atomic(self.path, self.data)
 
 
 STYLE = """
@@ -137,6 +142,21 @@ class Window(QMainWindow):
         recovery_layout = self.page('Восстановление', 'Как вы себя чувствуете? Выберите время и посильный способ восстановиться.')
         self.recovery = RecoveryPage(self)
         recovery_layout.addWidget(self.recovery)
+        self.updates = UpdatePanel(self, enabled=QApplication.instance().applicationName() == 'TochkaOpory' and '--update-smoke-test' not in sys.argv)
+        settings_layout = self.stack.widget(4).widget().layout()
+        settings_layout.insertWidget(settings_layout.count() - 1, self.updates)
+        self.centralWidget().layout().itemAt(0).widget().layout().insertWidget(2, self.updates.banner)
+        draft = self.store.data.get('ui_draft', {})
+        if isinstance(draft, dict):
+            self.trigger.setText(str(draft.get('trigger', '')))
+            self.action.setText(str(draft.get('action', '')))
+            if type(draft.get('duration')) is int:
+                self.duration.setValue(draft['duration'])
+            if draft.get('date') == date.today().isoformat():
+                self.note.setPlainText(str(draft.get('note', self.note.toPlainText())))
+                for slider, key in zip(self.sliders, ('mood', 'fatigue')):
+                    if type(draft.get(key)) is int:
+                        slider.setValue(draft[key])
         self.navigate(0)
 
     def build_settings(self):
@@ -460,6 +480,11 @@ class Window(QMainWindow):
             event.ignore()
             return
         self.recovery.stop_audio()
+        self.store.data['ui_draft'] = {'trigger': self.trigger.text(), 'action': self.action.text(), 'duration': self.duration.value(), 'date': date.today().isoformat(), 'note': self.note.toPlainText(), 'mood': self.sliders[0].value(), 'fatigue': self.sliders[1].value()}
+        if not self.persist():
+            event.ignore()
+            return
+        self.updates.shutdown()
         event.accept()
 
 
@@ -469,7 +494,10 @@ def main():
     app.setOrganizationName('MotivationApp')
     app.setStyle('Fusion')
     app.setStyleSheet(STYLE)
-    path = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)) / 'data.json'
+    path = Path(os.environ.get('TOCHKA_UPDATE_DATA') or (Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)) / 'data.json'))
+    smoke = '--update-smoke-test' in sys.argv
+    if smoke:
+        path = Path(sys.argv[sys.argv.index('--update-smoke-test') + 1])
     try:
         store = Store(path)
     except RuntimeError as exc:
@@ -477,6 +505,11 @@ def main():
         return 1
     window = Window(store)
     window.show()
+    if smoke:
+        QTimer.singleShot(200, app.quit)
+    elif os.environ.get('TOCHKA_UPDATE_TRIAL'):
+        from update_bootstrap import atomic
+        QTimer.singleShot(1500, lambda: atomic(Path(os.environ['TOCHKA_UPDATE_TRIAL']), {'ready': True}))
     return app.exec()
 
 

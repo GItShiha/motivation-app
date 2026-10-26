@@ -18,7 +18,8 @@ class Autostart:
         executable = Path(sys.executable)
         if self.platform == 'win32' and executable.with_name('pythonw.exe').is_file():
             executable = executable.with_name('pythonw.exe')
-        self.command = command or [str(executable), str(Path(__file__).resolve().with_name('main.py'))]
+        from update_bootstrap import launcher_command
+        self.command = command or launcher_command([str(executable), str(Path(__file__).resolve().with_name('main.py'))])
         if self.platform == 'darwin':
             self.path = home / 'Library/LaunchAgents/app.motivation.tochkaopory.plist'
         else:
