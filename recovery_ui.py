@@ -216,6 +216,9 @@ class RecoveryPage(QWidget):
         self.breath_origin = time.monotonic()
 
     def start(self):
+        if self.window.sleep.ledger is not None and self.window.sleep.practice.exercise is not None:
+            self.message.setText('Сначала завершите вечернюю практику.')
+            return
         if self.window.remaining:
             self.message.setText('Сначала завершите текущую фокус-сессию в разделе «Пауза от ленты».')
             return

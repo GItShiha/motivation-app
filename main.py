@@ -16,6 +16,7 @@ from recovery_ui import RecoveryPage
 from update_ui import UpdatePanel
 from tickets_ui import WorkPage
 from health_ui import HealthPage
+from sleep_ui import SleepPage
 from sounds import TimerSounds, SoundSettings
 from wellbeing import entries as valid_entries
 from wellbeing_ui import WellbeingPage
@@ -134,7 +135,7 @@ class Window(QMainWindow):
         top.addSpacing(20)
         self.navs = []
         self.stack = QStackedWidget()
-        for i, name in enumerate(['Обзор', 'Если → то', 'Пауза от ленты', 'Самочувствие', 'Настройки', 'Восстановление', 'Работа', 'Здоровье']):
+        for i, name in enumerate(['Обзор', 'Если → то', 'Пауза от ленты', 'Самочувствие', 'Настройки', 'Восстановление', 'Работа', 'Здоровье', 'Сон']):
             b = button(name, lambda checked=False, index=i: self.navigate(index))
             b.setObjectName('nav')
             b.setCheckable(True)
@@ -153,7 +154,7 @@ class Window(QMainWindow):
         nav.addWidget(separator)
         nav.addWidget(self.navs[4])
         # Tab follows the visible order even though page indices remain stable.
-        for first, second in zip([self.navs[i] for i in (0, 1, 2, 3, 5, 6, 7)], [self.navs[i] for i in (1, 2, 3, 5, 6, 7, 4)]):
+        for first, second in zip([self.navs[i] for i in (0, 1, 2, 3, 5, 6, 7, 8)], [self.navs[i] for i in (1, 2, 3, 5, 6, 7, 8, 4)]):
             QWidget.setTabOrder(first, second)
         row.addWidget(side)
         row.addWidget(self.stack, 1)
@@ -172,6 +173,9 @@ class Window(QMainWindow):
         health_layout = self.page('Здоровье', 'Ваши действия, расписание и история без медицинских рекомендаций.')
         self.health = HealthPage(self)
         health_layout.addWidget(self.health)
+        sleep_layout = self.page('Сон', 'Добровольные вечерние практики и дневник самооценок сна.')
+        self.sleep = SleepPage(self)
+        sleep_layout.addWidget(self.sleep)
         self.updates = UpdatePanel(self, enabled=QApplication.instance().applicationName() == 'TochkaOpory' and '--update-smoke-test' not in sys.argv)
         settings_layout = self.stack.widget(4).widget().layout()
         settings_layout.insertWidget(settings_layout.count() - 1, self.updates)
@@ -398,6 +402,9 @@ class Window(QMainWindow):
         lay.addStretch()
 
     def start_focus(self):
+        if self.sleep.ledger is not None and self.sleep.practice.exercise is not None:
+            self.focus_status.setText('Сначала завершите вечернюю практику.')
+            return
         if self.recovery.exercise is not None:
             self.focus_status.setText('Сначала завершите восстановление.')
             return
@@ -488,6 +495,8 @@ class Window(QMainWindow):
             c.addLayout(row)
             self.plan_list.addWidget(box)
         self.wellbeing.update_statistics()
+        if hasattr(self, 'sleep') and self.sleep.ledger is not None:
+            self.sleep.render()
 
     def closeEvent(self, event):
         if self.remaining:
@@ -506,6 +515,9 @@ class Window(QMainWindow):
         self.recovery.stop_audio()
         self.store.data['ui_draft'] = {'trigger': self.trigger.text(), 'action': self.action.text(), 'duration': self.duration.value(), 'date': date.today().isoformat(), 'wellbeing_date': self.wellbeing.selected.isoformat(), 'note': self.note.toPlainText(), 'mood': self.sliders[0].value(), 'fatigue': self.sliders[1].value()}
         if not self.persist():
+            event.ignore()
+            return
+        if not self.sleep.shutdown():
             event.ignore()
             return
         if not self.work.shutdown():
