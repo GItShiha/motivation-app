@@ -15,6 +15,8 @@ from autostart import Autostart
 from recovery_ui import RecoveryPage
 from update_ui import UpdatePanel
 from sounds import TimerSounds, SoundSettings
+from wellbeing import entries as valid_entries
+from wellbeing_ui import WellbeingPage
 
 from PySide6.QtCore import Qt, QTimer, QStandardPaths
 from PySide6.QtWidgets import (
@@ -172,10 +174,25 @@ class Window(QMainWindow):
             if type(draft.get('duration')) is int:
                 self.duration.setValue(draft['duration'])
             if draft.get('date') == date.today().isoformat():
-                self.note.setPlainText(str(draft.get('note', self.note.toPlainText())))
-                for slider, key in zip(self.sliders, ('mood', 'fatigue')):
-                    if type(draft.get(key)) is int:
-                        slider.setValue(draft[key])
+                try:
+                    selected = date.fromisoformat(draft.get('wellbeing_date', draft['date']))
+                    if selected <= date.today() and not self.wellbeing.dirty:
+                        from PySide6.QtCore import QDate
+                        self.wellbeing.calendar.setSelectedDate(QDate(selected.year, selected.month, selected.day))
+                except (ValueError, TypeError):
+                    pass
+                # New calendars persist per-date drafts; only import legacy form drafts.
+                if 'wellbeing_date' not in draft and not self.wellbeing.dirty:
+                    before = (self.note.toPlainText(), *(v.value() for v in self.sliders))
+                    self.wellbeing.loading = True
+                    self.note.setPlainText(str(draft.get('note', self.note.toPlainText())))
+                    for slider, key in zip(self.sliders, ('mood', 'fatigue')):
+                        if type(draft.get(key)) is int:
+                            slider.setValue(draft[key])
+                    self.wellbeing.loading = False
+                    after = (self.note.toPlainText(), *(v.value() for v in self.sliders))
+                    if before != after:
+                        self.wellbeing.edited()
         self.navigate(0)
 
     def build_settings(self):
@@ -427,48 +444,20 @@ class Window(QMainWindow):
             self.stop_focus(True)
 
     def build_wellbeing(self):
-        lay = self.page('Как вы сегодня?', 'Короткая отметка без оценок и требований к себе. Одна запись на день.')
-        box, c = card()
-        c.addWidget(label(datetime.now().strftime('%d.%m.%Y'), 'section'))
-        self.sliders = []
-        for title, hints in [('Самочувствие', '1 — тяжело · 10 — отлично'), ('Усталость', '1 — полон сил · 10 — очень устал')]:
-            val = label('')
-            slider = QSlider(Qt.Orientation.Horizontal)
-            slider.setRange(1, 10)
-            slider.valueChanged.connect(lambda v, l=val, t=title: l.setText(f'{t}: {v} / 10'))
-            slider.setValue(5)
-            c.addWidget(val)
-            c.addWidget(slider)
-            c.addWidget(label(hints, 'subtitle'))
-            self.sliders.append(slider)
-        self.note = QTextEdit()
-        self.note.setPlaceholderText('Что повлияло на ваше состояние? Что могло бы помочь?')
-        self.note.setMaximumHeight(110)
-        c.addWidget(self.note)
-        self.entry_status = label('', 'subtitle')
-        c.addWidget(self.entry_status)
-        c.addWidget(button('Сохранить отметку за сегодня', self.save_entry, True))
-        lay.addWidget(box)
-        existing = self.store.data['entries'].get(date.today().isoformat())
-        if existing:
-            self.sliders[0].setValue(existing['mood'])
-            self.sliders[1].setValue(existing['fatigue'])
-            self.note.setPlainText(existing['note'])
-        lay.addWidget(label('Последние 7 отметок', 'section'))
-        self.history = label('')
-        lay.addWidget(self.history)
-        lay.addWidget(label('Это инструмент самонаблюдения, а не медицинская оценка.', 'subtitle'))
+        lay = self.page('Самочувствие', 'Календарь, записи за любой прошедший день и история за все годы.')
+        self.wellbeing = WellbeingPage(self)
+        self.sliders = self.wellbeing.sliders
+        self.note = self.wellbeing.note
+        self.entry_status = self.wellbeing.status
+        lay.addWidget(self.wellbeing)
         lay.addStretch()
 
     def save_entry(self):
-        self.store.data['entries'][date.today().isoformat()] = {'mood': self.sliders[0].value(), 'fatigue': self.sliders[1].value(), 'note': self.note.toPlainText().strip()}
-        if self.persist():
-            self.entry_status.setText('Сохранено. Повторное сохранение обновит сегодняшнюю запись.')
-        self.refresh()
+        return self.wellbeing.save()
 
     def refresh(self):
         today = date.today().isoformat()
-        entries = self.store.data['entries']
+        entries = {day.isoformat(): value for day, value in valid_entries(self.store.data['entries']).items()}
         self.metrics[0].setText(str(len(self.store.data['plans'])))
         self.metrics[1].setText(str(sum(s['minutes'] for s in self.store.data['sessions'] if s['date'] == today)))
         self.metrics[2].setText(f"{entries[today]['mood']} / 10" if today in entries else '—')
@@ -488,11 +477,7 @@ class Window(QMainWindow):
             row.addWidget(button('Удалить', lambda checked=False, pid=p['id']: self.plan_action(pid, True)))
             c.addLayout(row)
             self.plan_list.addWidget(box)
-        lines = []
-        for day, e in sorted(entries.items(), reverse=True)[:7]:
-            lines.append(f"{day}   ·   Самочувствие {e['mood']}/10   ·   Усталость {e['fatigue']}/10" + (f"\n{e['note']}" if e['note'] else ''))
-        self.history.setText('\n\n'.join(lines) if lines else 'Здесь появятся ваши отметки. Начните с сегодняшнего дня.')
-        self.history.setTextFormat(Qt.TextFormat.PlainText)
+        self.wellbeing.update_statistics()
 
     def closeEvent(self, event):
         if self.remaining:
@@ -505,8 +490,11 @@ class Window(QMainWindow):
         if self.recovery.record and not self.recovery.save_result():
             event.ignore()
             return
+        if self.wellbeing.dirty and not self.wellbeing.save():
+            event.ignore()
+            return
         self.recovery.stop_audio()
-        self.store.data['ui_draft'] = {'trigger': self.trigger.text(), 'action': self.action.text(), 'duration': self.duration.value(), 'date': date.today().isoformat(), 'note': self.note.toPlainText(), 'mood': self.sliders[0].value(), 'fatigue': self.sliders[1].value()}
+        self.store.data['ui_draft'] = {'trigger': self.trigger.text(), 'action': self.action.text(), 'duration': self.duration.value(), 'date': date.today().isoformat(), 'wellbeing_date': self.wellbeing.selected.isoformat(), 'note': self.note.toPlainText(), 'mood': self.sliders[0].value(), 'fatigue': self.sliders[1].value()}
         if not self.persist():
             event.ignore()
             return
