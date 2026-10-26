@@ -15,6 +15,7 @@ from autostart import Autostart
 from recovery_ui import RecoveryPage
 from update_ui import UpdatePanel
 from tickets_ui import WorkPage
+from health_ui import HealthPage
 from sounds import TimerSounds, SoundSettings
 from wellbeing import entries as valid_entries
 from wellbeing_ui import WellbeingPage
@@ -133,7 +134,7 @@ class Window(QMainWindow):
         top.addSpacing(20)
         self.navs = []
         self.stack = QStackedWidget()
-        for i, name in enumerate(['Обзор', 'Если → то', 'Пауза от ленты', 'Самочувствие', 'Настройки', 'Восстановление', 'Работа']):
+        for i, name in enumerate(['Обзор', 'Если → то', 'Пауза от ленты', 'Самочувствие', 'Настройки', 'Восстановление', 'Работа', 'Здоровье']):
             b = button(name, lambda checked=False, index=i: self.navigate(index))
             b.setObjectName('nav')
             b.setCheckable(True)
@@ -152,7 +153,7 @@ class Window(QMainWindow):
         nav.addWidget(separator)
         nav.addWidget(self.navs[4])
         # Tab follows the visible order even though page indices remain stable.
-        for first, second in zip([self.navs[i] for i in (0, 1, 2, 3, 5, 6)], [self.navs[i] for i in (1, 2, 3, 5, 6, 4)]):
+        for first, second in zip([self.navs[i] for i in (0, 1, 2, 3, 5, 6, 7)], [self.navs[i] for i in (1, 2, 3, 5, 6, 7, 4)]):
             QWidget.setTabOrder(first, second)
         row.addWidget(side)
         row.addWidget(self.stack, 1)
@@ -168,6 +169,9 @@ class Window(QMainWindow):
         work_layout = self.page('Работа', 'Ручной учёт тикетов и посильные перерывы.')
         self.work = WorkPage(self)
         work_layout.addWidget(self.work)
+        health_layout = self.page('Здоровье', 'Ваши действия, расписание и история без медицинских рекомендаций.')
+        self.health = HealthPage(self)
+        health_layout.addWidget(self.health)
         self.updates = UpdatePanel(self, enabled=QApplication.instance().applicationName() == 'TochkaOpory' and '--update-smoke-test' not in sys.argv)
         settings_layout = self.stack.widget(4).widget().layout()
         settings_layout.insertWidget(settings_layout.count() - 1, self.updates)
@@ -507,6 +511,7 @@ class Window(QMainWindow):
         if not self.work.shutdown():
             event.ignore()
             return
+        self.health.shutdown()
         self.updates.shutdown()
         self.sounds.stop()
         event.accept()
