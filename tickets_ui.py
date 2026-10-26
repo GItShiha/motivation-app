@@ -1,7 +1,12 @@
 """Work page and an independent Qt floating counter, with no CRM access."""
-from PySide6.QtCore import Qt, QByteArray, QTimer
+import json
+import os
+from pathlib import Path
+import sys
+from PySide6.QtCore import Qt, QByteArray, QTimer, QProcess
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QSpinBox, QCheckBox, QProgressBar, QApplication, QMessageBox)
+    QSpinBox, QCheckBox, QProgressBar, QApplication, QMessageBox, QScrollArea, QLayout, QSizePolicy)
 from tickets import TicketLedger
 
 
@@ -32,6 +37,7 @@ class CounterView(QWidget):
         super().__init__()
         self.page = page
         lay = QVBoxLayout(self)
+        lay.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
         self.count = text()
         self.count.setObjectName('metric')
         self.count.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -54,6 +60,7 @@ class CounterView(QWidget):
         self.break_box = QWidget()
         controls = QVBoxLayout(self.break_box)
         self.break_text = text()
+        self.break_text.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         controls.addWidget(self.break_text)
         controls.addWidget(button('Перейти в «Восстановление»', page.recover))
         row = QHBoxLayout()
@@ -93,6 +100,15 @@ class FloatingCounter(QWidget):
         self.setWindowTitle('Точка опоры · Тикеты')
         self.resize(330, 380)
         lay = QVBoxLayout(self)
+        self.content = QWidget()
+        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setWidget(self.content)
+        lay.addWidget(self.scroll)
+        lay = self.content_layout
         self.view = CounterView(page)
         lay.addWidget(self.view)
         self.top = QCheckBox('Поверх всех окон')
@@ -116,15 +132,62 @@ class FloatingCounter(QWidget):
             self.restoreGeometry(QByteArray.fromBase64(encoded.encode()))
         self.top.toggled.connect(self.top_changed)
         self.compact.toggled.connect(self.compact_changed)
+        self.pin_process = None
         self.ready = True
         self.compact_changed(save=False)
 
     def top_changed(self):
+        if QGuiApplication.platformName().startswith('wayland'):
+            self.pin_kwin()
+            return
         geometry = self.saveGeometry()
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.top.isChecked())
         self.show()
         self.restoreGeometry(geometry)
         self.save_state()
+
+    def pin_kwin(self):
+        if self.pin_process is not None:
+            return
+        enabled = self.top.isChecked()
+        self.top.setEnabled(False)
+        self.help.setText('Запрашиваем закрепление окна у KWin…')
+        process = QProcess(self)
+        self.pin_process = process
+        process.setProgram(sys.executable)
+        process.setArguments([str(Path(__file__).with_name('kwin_pin.py')), str(os.getpid()), '1' if enabled else '0', self.windowTitle()])
+        process.setStandardErrorFile(QProcess.nullDevice())
+        def done(*args):
+            if self.pin_process is not process:
+                return
+            try:
+                confirmed = json.loads(bytes(process.readAllStandardOutput())).get('ok') is True
+            except (ValueError, UnicodeError):
+                confirmed = False
+            self.pin_process = None
+            self.top.setEnabled(True)
+            if not confirmed:
+                self.top.blockSignals(True)
+                self.top.setChecked(not enabled)
+                self.top.blockSignals(False)
+                self.help.setText('KWin не подтвердил изменение. Используйте Alt+F3 → Дополнительные действия → Поверх остальных.')
+            else:
+                self.help.setText('KWin подтвердил: ' + ('окно поверх остальных.' if enabled else 'обычный режим окна.'))
+            self.save_state()
+            process.deleteLater()
+        process.finished.connect(done)
+        process.errorOccurred.connect(lambda error: done() if error == QProcess.ProcessError.FailedToStart else None)
+        watchdog = QTimer(process)
+        watchdog.setSingleShot(True)
+        watchdog.timeout.connect(process.kill)
+        watchdog.start(7000)
+        process.start()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, self.fit_content)
+        if self.ready and self.top.isChecked() and QGuiApplication.platformName().startswith('wayland'):
+            QTimer.singleShot(200, self.pin_kwin)
 
     def compact_changed(self, *args, save=True):
         compact = self.compact.isChecked()
@@ -132,12 +195,27 @@ class FloatingCounter(QWidget):
             w.setVisible(not compact)
         self.more.setVisible(compact)
         if compact:
-            self.resize(self.width(), self.minimumSizeHint().height())
+            self.content.layout().activate()
+            self.resize(self.width(), self.content.sizeHint().height() + 24)
+        if not compact:
+            QTimer.singleShot(0, self.fit_content)
         if save:
             self.save_state()
 
+    def fit_content(self):
+        if self.compact.isChecked() or not self.isVisible():
+            return
+        width = self.scroll.viewport().width()
+        needed = self.content.heightForWidth(width)
+        if needed < 0:
+            needed = self.content.sizeHint().height()
+        limit = self.screen().availableGeometry().height() - 80
+        self.resize(self.width(), min(max(self.height(), needed + 32), max(200, limit)))
+
     def render(self):
         self.view.render()
+        self.content.layout().activate()
+        self.fit_content()
         if self.compact.isChecked():
             for w in (self.view.details, self.view.progress, self.view.notice, self.view.break_box):
                 w.hide()
@@ -158,7 +236,21 @@ class FloatingCounter(QWidget):
         if self.ready:
             self.geometry_timer.start()
 
+    def stop_pin(self):
+        process = self.pin_process
+        if process is not None:
+            self.pin_process = None
+            process.finished.disconnect()
+            process.errorOccurred.disconnect()
+            process.finished.connect(process.deleteLater)
+            process.kill()
+            self.top.blockSignals(True)
+            self.top.setChecked(not self.top.isChecked())
+            self.top.blockSignals(False)
+            self.top.setEnabled(True)
+
     def closeEvent(self, event):
+        self.stop_pin()
         self.geometry_timer.stop()
         if self.save_state():
             event.accept()
@@ -307,6 +399,7 @@ class WorkPage(QWidget):
 
     def shutdown(self):
         if self.floating:
+            self.floating.stop_pin()
             self.floating.geometry_timer.stop()
             if not self.floating.save_state():
                 return False
