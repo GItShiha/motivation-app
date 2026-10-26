@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QCheckBox, QComboBox
 from PySide6.QtCore import Qt
 
 TONES = {'soft': 'Мягкий', 'bell': 'Колокольчик', 'two_notes': 'Две ноты'}
-CATEGORIES = {'focus': 'Фокус-сессии', 'recovery': 'Перерывы и восстановление', 'tickets_break': 'Перерывы по тикетам', 'tickets_goal': 'Достижение нормы тикетов'}
+CATEGORIES = {'focus': 'Фокус-сессии', 'recovery': 'Перерывы и восстановление', 'tickets_break': 'Перерывы по тикетам', 'tickets_goal': 'Достижение нормы тикетов', 'sleep': 'Вечерние практики'}
 
 
 def preferences(raw):

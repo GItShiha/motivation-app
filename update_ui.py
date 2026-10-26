@@ -169,7 +169,7 @@ class UpdatePanel(QWidget):
         self.notice.setText('Доступно обновление „Точки опоры“\nРевизия: ' + (self.target or '') + '\nИсточник: github.com/GItShiha/motivation-app, main.\nБудут подготовлены отдельное окружение, копия данных и точка возврата. Установка требует подтверждения. Локальные изменения не перезаписываются.')
 
     def busy(self):
-        return bool(self.window.remaining or self.window.recovery.exercise is not None)
+        return bool(self.window.remaining or self.window.recovery.exercise is not None or (self.window.sleep.ledger is not None and self.window.sleep.practice.exercise is not None))
 
     def update_focus(self):
         self.install_button.setEnabled(not self.busy())
