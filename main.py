@@ -14,6 +14,7 @@ from guide import IntentionsGuide
 from autostart import Autostart
 from recovery_ui import RecoveryPage
 from update_ui import UpdatePanel
+from tickets_ui import WorkPage
 from sounds import TimerSounds, SoundSettings
 from wellbeing import entries as valid_entries
 from wellbeing_ui import WellbeingPage
@@ -132,7 +133,7 @@ class Window(QMainWindow):
         top.addSpacing(20)
         self.navs = []
         self.stack = QStackedWidget()
-        for i, name in enumerate(['Обзор', 'Если → то', 'Пауза от ленты', 'Самочувствие', 'Настройки', 'Восстановление']):
+        for i, name in enumerate(['Обзор', 'Если → то', 'Пауза от ленты', 'Самочувствие', 'Настройки', 'Восстановление', 'Работа']):
             b = button(name, lambda checked=False, index=i: self.navigate(index))
             b.setObjectName('nav')
             b.setCheckable(True)
@@ -151,7 +152,7 @@ class Window(QMainWindow):
         nav.addWidget(separator)
         nav.addWidget(self.navs[4])
         # Tab follows the visible order even though page indices remain stable.
-        for first, second in zip([self.navs[i] for i in (0, 1, 2, 3, 5)], [self.navs[i] for i in (1, 2, 3, 5, 4)]):
+        for first, second in zip([self.navs[i] for i in (0, 1, 2, 3, 5, 6)], [self.navs[i] for i in (1, 2, 3, 5, 6, 4)]):
             QWidget.setTabOrder(first, second)
         row.addWidget(side)
         row.addWidget(self.stack, 1)
@@ -164,6 +165,9 @@ class Window(QMainWindow):
         recovery_layout = self.page('Восстановление', 'Как вы себя чувствуете? Выберите время и посильный способ восстановиться.')
         self.recovery = RecoveryPage(self)
         recovery_layout.addWidget(self.recovery)
+        work_layout = self.page('Работа', 'Ручной учёт тикетов и посильные перерывы.')
+        self.work = WorkPage(self)
+        work_layout.addWidget(self.work)
         self.updates = UpdatePanel(self, enabled=QApplication.instance().applicationName() == 'TochkaOpory' and '--update-smoke-test' not in sys.argv)
         settings_layout = self.stack.widget(4).widget().layout()
         settings_layout.insertWidget(settings_layout.count() - 1, self.updates)
@@ -498,6 +502,9 @@ class Window(QMainWindow):
         self.recovery.stop_audio()
         self.store.data['ui_draft'] = {'trigger': self.trigger.text(), 'action': self.action.text(), 'duration': self.duration.value(), 'date': date.today().isoformat(), 'wellbeing_date': self.wellbeing.selected.isoformat(), 'note': self.note.toPlainText(), 'mood': self.sliders[0].value(), 'fatigue': self.sliders[1].value()}
         if not self.persist():
+            event.ignore()
+            return
+        if not self.work.shutdown():
             event.ignore()
             return
         self.updates.shutdown()

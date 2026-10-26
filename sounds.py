@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QCheckBox, QComboBox
 from PySide6.QtCore import Qt
 
 TONES = {'soft': 'Мягкий', 'bell': 'Колокольчик', 'two_notes': 'Две ноты'}
-CATEGORIES = {'focus': 'Фокус-сессии', 'recovery': 'Перерывы и восстановление'}
+CATEGORIES = {'focus': 'Фокус-сессии', 'recovery': 'Перерывы и восстановление', 'tickets_break': 'Перерывы по тикетам', 'tickets_goal': 'Достижение нормы тикетов'}
 
 
 def preferences(raw):
@@ -40,8 +40,10 @@ class TimerSounds(QObject):
             process, self.process = self.process, None
             process.kill()
 
-    def play(self, category=None):
-        settings = self.settings
+    def play(self, category=None, tone=None):
+        settings = dict(self.settings)
+        if tone in TONES:
+            settings['tone'] = tone
         if not settings['enabled'] or settings['volume'] == 0:
             return
         if category is not None and not settings['categories'].get(category, False):
