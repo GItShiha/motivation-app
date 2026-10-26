@@ -6,11 +6,13 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 
+from guide import IntentionsGuide
+
 from PySide6.QtCore import Qt, QTimer, QStandardPaths
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
     QPushButton, QFrame, QLineEdit, QTextEdit, QSlider, QSpinBox, QComboBox,
-    QStackedWidget, QScrollArea, QMessageBox,
+    QStackedWidget, QScrollArea, QMessageBox, QLayout,
 )
 
 
@@ -141,6 +143,7 @@ class Window(QMainWindow):
     def page(self, title, subtitle):
         contents = QWidget()
         layout = QVBoxLayout(contents)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
         layout.setContentsMargins(36, 30, 36, 30)
         layout.setSpacing(20)
         layout.addWidget(label(title, 'title'))
@@ -199,10 +202,32 @@ class Window(QMainWindow):
         c.addWidget(self.plan_status)
         c.addWidget(button('Добавить план', self.add_plan, True))
         lay.addWidget(box)
+        self.guide = IntentionsGuide(self.store.data.setdefault('guide', {}))
+        self.guide.example_selected.connect(self.use_example)
+        self.guide.state_changed.connect(self.save_guide_state)
+        lay.addWidget(self.guide)
         lay.addWidget(label('Мои планы', 'section'))
         self.plan_list = QVBoxLayout()
         lay.addLayout(self.plan_list)
         lay.addStretch()
+
+    def save_guide_state(self):
+        self.persist()
+        # Nested expanding layouts must propagate their new height to the scroll area.
+        QTimer.singleShot(0, self.resize_plans_page)
+
+    def resize_plans_page(self):
+        page = self.stack.widget(1).widget()
+        page.layout().invalidate()
+        page.layout().activate()
+        page.adjustSize()
+
+    def use_example(self, trigger, action):
+        self.trigger.setText(trigger)
+        self.action.setText(action)
+        self.plan_status.setText('Пример перенесён. Отредактируйте его под себя и нажмите «Добавить план».')
+        self.trigger.setFocus()
+        self.stack.widget(1).ensureWidgetVisible(self.trigger)
 
     def add_plan(self):
         trigger, action = self.trigger.text().strip(), self.action.text().strip()
