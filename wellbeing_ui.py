@@ -2,9 +2,9 @@
 from datetime import date
 
 from PySide6.QtCore import QDate, QLocale, QPointF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QTextCharFormat, QIcon
+from PySide6.QtGui import QColor, QPainter, QPen, QTextCharFormat
 from PySide6.QtWidgets import (QWidget, QCalendarWidget, QVBoxLayout, QHBoxLayout,
-    QToolButton, QLabel, QSlider, QTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView)
+    QComboBox, QLabel, QSlider, QTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView)
 from wellbeing import MONTHS, entries, score, month_stats, year_stats, month_series, change
 
 
@@ -36,13 +36,7 @@ class Calendar(QCalendarWidget):
         self.setHeaderTextFormat(header)
         for weekday in (Qt.DayOfWeek.Saturday, Qt.DayOfWeek.Sunday):
             self.setWeekdayTextFormat(weekday, header)
-        for name, symbol, hint in (('qt_calendar_prevmonth', '‹', 'Предыдущий месяц'), ('qt_calendar_nextmonth', '›', 'Следующий месяц')):
-            arrow = self.findChild(QToolButton, name)
-            if arrow is not None:
-                arrow.setIcon(QIcon())
-                arrow.setText(symbol)
-                arrow.setToolTip(hint)
-                arrow.setAccessibleName(hint)
+        self.setNavigationBarVisible(False)
         self.setGridVisible(True)
         self.setMinimumHeight(340)
         self.records = entries(store.data['entries'])
@@ -71,6 +65,68 @@ class Calendar(QCalendarWidget):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(QPointF(rect.right() - 7, rect.top() + 7), 2, 2)
         painter.restore()
+
+
+class CalendarNavigation(QWidget):
+    """Public Qt controls, without relying on the native calendar's year editor."""
+    def __init__(self, calendar):
+        super().__init__()
+        self.calendar = calendar
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.previous = QPushButton('‹')
+        self.previous.setAccessibleName('Предыдущий месяц')
+        self.previous.setToolTip('Предыдущий месяц')
+        self.next = QPushButton('›')
+        self.next.setAccessibleName('Следующий месяц')
+        self.next.setToolTip('Следующий месяц')
+        self.month = QComboBox()
+        self.month.setAccessibleName('Месяц календаря')
+        for month, name in enumerate(MONTHS, 1):
+            self.month.addItem(name, month)
+        self.year = QComboBox()
+        self.year.setAccessibleName('Год календаря')
+        self.year.setMaxVisibleItems(12)
+        self.year.setStyleSheet('QComboBox { combobox-popup: 0; }')
+        self.year.setToolTip('Выберите год из списка; можно искать год набором цифр')
+        row.addWidget(self.previous)
+        row.addWidget(self.month, 1)
+        row.addWidget(self.year, 1)
+        row.addWidget(self.next)
+        self.previous.clicked.connect(calendar.showPreviousMonth)
+        self.next.clicked.connect(calendar.showNextMonth)
+        self.month.currentIndexChanged.connect(self.choose)
+        self.year.currentIndexChanged.connect(self.choose)
+        calendar.currentPageChanged.connect(self.sync)
+        self.sync()
+
+    def sync(self, *args):
+        low, high = self.calendar.minimumDate(), self.calendar.maximumDate()
+        year, month = self.calendar.yearShown(), self.calendar.monthShown()
+        self.year.blockSignals(True)
+        self.month.blockSignals(True)
+        if self.year.count() != high.year() - low.year() + 1:
+            self.year.clear()
+            for y in range(high.year(), low.year() - 1, -1):
+                self.year.addItem(str(y), y)
+        self.year.setCurrentIndex(self.year.findData(year))
+        self.month.setCurrentIndex(month - 1)
+        for i in range(12):
+            allowed = QDate(year, i + 1, 1) <= high and QDate(year, i + 1, 1).addMonths(1).addDays(-1) >= low
+            self.month.model().item(i).setEnabled(allowed)
+        self.previous.setEnabled((year, month) > (low.year(), low.month()))
+        self.next.setEnabled((year, month) < (high.year(), high.month()))
+        self.month.blockSignals(False)
+        self.year.blockSignals(False)
+
+    def choose(self, *args):
+        year, month = self.year.currentData(), self.month.currentData()
+        if year is None or month is None:
+            return
+        day = QDate(year, month, 1)
+        day = max(self.calendar.minimumDate(), min(day, self.calendar.maximumDate()))
+        self.calendar.setCurrentPage(day.year(), day.month())
+        self.sync()
 
 
 class MoodChart(QWidget):
@@ -120,6 +176,8 @@ class WellbeingPage(QWidget):
         self.dirty = False
         lay = QVBoxLayout(self)
         self.calendar = Calendar(window.store)
+        self.calendar_navigation = CalendarNavigation(self.calendar)
+        lay.addWidget(self.calendar_navigation)
         lay.addWidget(self.calendar)
         lay.addWidget(text('Шкала: 0–2 — тяжело · 3–4 — ниже среднего · 5–6 — средне · 7–8 — хорошо · 9–10 — отлично.\nЦвет от тёплого к зелёному; «—» — нет записи. Белая точка — сегодня, сиреневая — выбранный день.'))
         self.heading = text('')
@@ -281,3 +339,4 @@ class WellbeingPage(QWidget):
             for j, value in enumerate(values):
                 self.table.setItem(i, j, QTableWidgetItem(value))
         self.calendar.reload()
+        self.calendar_navigation.sync()
