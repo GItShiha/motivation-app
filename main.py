@@ -14,6 +14,7 @@ from guide import IntentionsGuide
 from autostart import Autostart
 from recovery_ui import RecoveryPage
 from update_ui import UpdatePanel
+from sounds import TimerSounds, SoundSettings
 
 from PySide6.QtCore import Qt, QTimer, QStandardPaths
 from PySide6.QtWidgets import (
@@ -99,6 +100,7 @@ class Window(QMainWindow):
     def __init__(self, store, autostart=None):
         super().__init__()
         self.store = store
+        self.sounds = TimerSounds(store, self)
         self.autostart = autostart if autostart is not None else Autostart()
         self.setWindowTitle('Точка опоры')
         self.resize(1140, 820)
@@ -118,9 +120,13 @@ class Window(QMainWindow):
         side.setFixedWidth(230)
         nav = QVBoxLayout(side)
         nav.setContentsMargins(20, 30, 20, 24)
-        nav.addWidget(label('◈  ТОЧКА ОПОРЫ', 'section'))
-        nav.addWidget(label('Маленькие шаги.\nБольше пространства.', 'subtitle'))
-        nav.addSpacing(35)
+        main_nav = QWidget()
+        top = QVBoxLayout(main_nav)
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
+        top.addWidget(label('◈  ТОЧКА ОПОРЫ', 'section'))
+        top.addWidget(label('Маленькие шаги.\nБольше пространства.', 'subtitle'))
+        top.addSpacing(20)
         self.navs = []
         self.stack = QStackedWidget()
         for i, name in enumerate(['Обзор', 'Если → то', 'Пауза от ленты', 'Самочувствие', 'Настройки', 'Восстановление']):
@@ -128,9 +134,22 @@ class Window(QMainWindow):
             b.setObjectName('nav')
             b.setCheckable(True)
             self.navs.append(b)
-            nav.addWidget(b)
-        nav.addStretch()
+            if i != 4:
+                top.addWidget(b)
+        top.addStretch()
+        self.nav_scroll = QScrollArea()
+        self.nav_scroll.setWidgetResizable(True)
+        self.nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.nav_scroll.setWidget(main_nav)
+        nav.addWidget(self.nav_scroll, 1)
         nav.addWidget(label('Локально и лично\nДанные остаются на устройстве', 'subtitle'))
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        nav.addWidget(separator)
+        nav.addWidget(self.navs[4])
+        # Tab follows the visible order even though page indices remain stable.
+        for first, second in zip([self.navs[i] for i in (0, 1, 2, 3, 5)], [self.navs[i] for i in (1, 2, 3, 5, 4)]):
+            QWidget.setTabOrder(first, second)
         row.addWidget(side)
         row.addWidget(self.stack, 1)
         self.setCentralWidget(root)
@@ -145,7 +164,7 @@ class Window(QMainWindow):
         self.updates = UpdatePanel(self, enabled=QApplication.instance().applicationName() == 'TochkaOpory' and '--update-smoke-test' not in sys.argv)
         settings_layout = self.stack.widget(4).widget().layout()
         settings_layout.insertWidget(settings_layout.count() - 1, self.updates)
-        self.centralWidget().layout().itemAt(0).widget().layout().insertWidget(2, self.updates.banner)
+        top.insertWidget(top.count() - 1, self.updates.banner)
         draft = self.store.data.get('ui_draft', {})
         if isinstance(draft, dict):
             self.trigger.setText(str(draft.get('trigger', '')))
@@ -160,7 +179,11 @@ class Window(QMainWindow):
         self.navigate(0)
 
     def build_settings(self):
-        lay = self.page('Настройки', 'Выберите, как приложение будет запускаться.')
+        lay = self.page('Настройки', 'Звуки, запуск приложения и обновления.')
+        sound_box, sound_contents = card()
+        self.sound_settings = SoundSettings(self)
+        sound_contents.addWidget(self.sound_settings)
+        lay.addWidget(sound_box)
         box, contents = card()
         self.autostart_toggle = QCheckBox('Запускать при входе в систему')
         contents.addWidget(self.autostart_toggle)
@@ -374,6 +397,8 @@ class Window(QMainWindow):
             self.focus_status.setText('Сессия продолжается.')
 
     def stop_focus(self, completed=False):
+        if completed and self.start_button.isEnabled():
+            return
         self.deadline = None
         self.remaining = 0
         self.duration.setEnabled(True)
@@ -385,7 +410,8 @@ class Window(QMainWindow):
             self.store.data['sessions'].append({'date': date.today().isoformat(), 'minutes': self.session_minutes})
             self.persist()
             self.focus_status.setText('Сессия завершена! Сделайте небольшой перерыв. Время добавлено в обзор.')
-            QApplication.beep()
+            self.sounds.play('focus')
+            QApplication.alert(self, 0)
         else:
             self.focus_status.setText('Сессия остановлена. Незавершённое время не добавлено в статистику. Можно начать снова.')
         self.refresh()
@@ -485,6 +511,7 @@ class Window(QMainWindow):
             event.ignore()
             return
         self.updates.shutdown()
+        self.sounds.stop()
         event.accept()
 
 

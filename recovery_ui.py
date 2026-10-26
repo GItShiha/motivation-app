@@ -1,4 +1,4 @@
-"""Recovery page; no network, automatic sound, or modal exercise prompts."""
+"""Recovery page; no network or modal exercise prompts."""
 from datetime import datetime
 import math
 import time
@@ -265,6 +265,8 @@ class RecoveryPage(QWidget):
         self.saved = False
         self.pages.setCurrentIndex(2)
         self.save_result()
+        if status == 'completed':
+            self.window.sounds.play('recovery')
 
     def build_result(self):
         lay = self.panel()
