@@ -207,6 +207,10 @@ class WellbeingPage(QWidget):
         save = QPushButton('Сохранить выбранный день')
         save.clicked.connect(self.save)
         lay.addWidget(save)
+        self.clear_button = QPushButton('Удалить запись за выбранный день')
+        self.clear_button.setToolTip('Удалить оценку самочувствия, усталость и заметку только за выбранную дату')
+        self.clear_button.clicked.connect(self.clear_day)
+        lay.addWidget(self.clear_button)
         today = QPushButton('Сегодня')
         today.clicked.connect(lambda: self.calendar.setSelectedDate(QDate.currentDate()))
         lay.addWidget(today)
@@ -284,6 +288,27 @@ class WellbeingPage(QWidget):
             return
         self.selected = chosen
         self.load()
+
+    def clear_day(self):
+        data = self.window.store.data
+        key = self.selected.isoformat()
+        old_entries = dict(data['entries'])
+        old_drafts = data.get('wellbeing_drafts')
+        drafts = dict(self.drafts())
+        data['entries'].pop(key, None)
+        drafts.pop(key, None)
+        data['wellbeing_drafts'] = drafts
+        if not self.window.persist():
+            data['entries'] = old_entries
+            if old_drafts is None:
+                data.pop('wellbeing_drafts', None)
+            else:
+                data['wellbeing_drafts'] = old_drafts
+            return False
+        self.load()
+        self.status.setText('Запись удалена. День пустой и не участвует в статистике.')
+        self.window.refresh()
+        return True
 
     def save(self):
         if self.selected > date.today():
